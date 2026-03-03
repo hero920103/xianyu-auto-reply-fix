@@ -5300,6 +5300,24 @@ def create_card(card_data: dict, current_user: Dict[str, Any] = Depends(get_curr
             user_id=user_id
         )
 
+        # 检查是否需要生成对应发货规则
+        generate_delivery_rule = card_data.get('generate_delivery_rule', False)
+        if generate_delivery_rule:
+            try:
+                # 生成发货规则
+                rule_id = db_manager.create_delivery_rule(
+                    keyword=card_data.get('name'),  # 商品关键字设置为卡券名称
+                    card_id=card_id,  # 匹配卡券设置为当前新添加的卡券ID
+                    delivery_count=1,  # 默认发货数量为1
+                    enabled=True,  # 默认启用
+                    description=f"自动生成的发货规则 - 对应卡券: {card_data.get('name')}",
+                    user_id=user_id
+                )
+                log_with_user('info', f"自动生成发货规则成功: 卡券ID={card_id}, 规则ID={rule_id}", current_user)
+            except Exception as e:
+                log_with_user('error', f"生成发货规则失败: {str(e)}", current_user)
+                # 不影响卡券创建，仅记录错误
+
         log_with_user('info', f"卡券创建成功: {card_name} (ID: {card_id})", current_user)
         return {"id": card_id, "message": "卡券创建成功"}
     except Exception as e:

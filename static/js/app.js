@@ -5838,13 +5838,19 @@ async function saveCard() {
         break;
     }
 
+    // 获取"生成对应发货规则"开关状态
+    const generateDeliveryRule = document.getElementById('generateDeliveryRule').checked;
+    
     const response = await fetch(`${apiBase}/cards`, {
         method: 'POST',
         headers: {
         'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
         },
-        body: JSON.stringify(cardData)
+        body: JSON.stringify({
+            ...cardData,
+            generate_delivery_rule: generateDeliveryRule
+        })
     });
 
     if (response.ok) {
