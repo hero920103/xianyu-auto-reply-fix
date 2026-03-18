@@ -890,6 +890,8 @@ class XianyuLive:
 
         # 订单详情补抓任务：详情首次超时时，后台再补抓一次，避免整单丢失
         self.order_detail_retry_tasks = {}
+        self.order_detail_force_refresh_marks = {}
+        self.order_detail_force_refresh_cooldown = 5
 
         # 初始化订单状态处理器
         self._init_order_status_handler()
@@ -1149,6 +1151,13 @@ class XianyuLive:
             f"{log_prefix} sid命中的订单状态未就绪，尝试强制刷新订单详情后重试: "
             f"order_id={order_id}, status={old_status}"
         )
+
+        if not self._reserve_order_detail_force_refresh(
+            order_id,
+            reason='sid_not_ready',
+            log_prefix=log_prefix,
+        ):
+            return sid_lookup
 
         try:
             await self.fetch_order_detail_info(
@@ -2295,15 +2304,151 @@ class XianyuLive:
                 if order_id in self._order_detail_lock_times:
                     del self._order_detail_lock_times[order_id]
 
-            total_expired = len(expired_delivery_locks) + len(expired_detail_locks)
+            expired_refresh_marks = []
+            for order_id, refresh_info in self.order_detail_force_refresh_marks.items():
+                refresh_timestamp = refresh_info.get('timestamp', 0) if isinstance(refresh_info, dict) else 0
+                if current_time - refresh_timestamp > max_age_seconds:
+                    expired_refresh_marks.append(order_id)
+
+            for order_id in expired_refresh_marks:
+                self.order_detail_force_refresh_marks.pop(order_id, None)
+
+            total_expired = len(expired_delivery_locks) + len(expired_detail_locks) + len(expired_refresh_marks)
             if total_expired > 0:
-                logger.info(f"【{self.cookie_id}】清理了 {total_expired} 个过期锁 (发货锁: {len(expired_delivery_locks)}, 详情锁: {len(expired_detail_locks)})")
+                logger.info(
+                    f"【{self.cookie_id}】清理了 {total_expired} 个过期锁/标记 "
+                    f"(发货锁: {len(expired_delivery_locks)}, 详情锁: {len(expired_detail_locks)}, 刷新标记: {len(expired_refresh_marks)})"
+                )
                 logger.warning(f"【{self.cookie_id}】当前锁数量 - 发货锁: {len(self._order_locks)}, 详情锁: {len(self._order_detail_locks)}")
 
         except Exception as e:
             logger.error(f"【{self.cookie_id}】清理过期锁时发生错误: {self._safe_str(e)}")
 
-    
+    def _get_order_status_priority(self, status: str) -> int:
+        normalized_status = db_manager._normalize_order_status(status)
+        priority_map = {
+            'unknown': 0,
+            'processing': 10,
+            'pending_payment': 15,
+            'pending_ship': 20,
+            'partial_success': 30,
+            'partial_pending_finalize': 30,
+            'shipped': 40,
+            'completed': 50,
+            'refunding': 60,
+            'refund_cancelled': 65,
+            'cancelled': 70,
+        }
+        return priority_map.get(normalized_status or 'unknown', 0)
+
+    def _reserve_order_detail_force_refresh(self, order_id: str, *, reason: str,
+                                            log_prefix: str = "", cooldown_seconds: float = None) -> bool:
+        normalized_order_id = str(order_id or '').strip()
+        if not normalized_order_id:
+            return False
+
+        cooldown = float(cooldown_seconds or self.order_detail_force_refresh_cooldown or 0)
+        now = time.time()
+        existing = self.order_detail_force_refresh_marks.get(normalized_order_id) or {}
+        last_timestamp = existing.get('timestamp', 0)
+        elapsed = now - last_timestamp
+
+        if last_timestamp and cooldown > 0 and elapsed < cooldown:
+            logger.info(
+                f"{log_prefix} 订单详情强刷命中冷却，跳过重复刷新: "
+                f"order_id={normalized_order_id}, reason={reason}, "
+                f"last_reason={existing.get('reason', 'unknown')}, remaining={round(cooldown - elapsed, 2)}s"
+            )
+            return False
+
+        self.order_detail_force_refresh_marks[normalized_order_id] = {
+            'timestamp': now,
+            'reason': reason,
+        }
+        return True
+
+    def _should_force_refresh_after_status_signal(self, status_signal: str, current_status: str) -> bool:
+        normalized_signal = db_manager._normalize_order_status(status_signal)
+        normalized_current = db_manager._normalize_order_status(current_status)
+
+        if not normalized_signal or normalized_signal == 'unknown':
+            return False
+
+        if normalized_signal == 'pending_ship':
+            return normalized_current in {None, '', 'unknown', 'processing', 'pending_payment'}
+
+        if normalized_signal == 'shipped':
+            return normalized_current in {None, '', 'unknown', 'processing', 'pending_payment', 'pending_ship'}
+
+        if normalized_signal in {'completed', 'cancelled', 'refunding', 'refund_cancelled'}:
+            if not normalized_current or normalized_current == 'unknown':
+                return True
+            return self._get_order_status_priority(normalized_signal) > self._get_order_status_priority(normalized_current)
+
+        return False
+
+    async def _maybe_force_refresh_order_detail_for_signal(self, order_id: str, *, item_id: str = None,
+                                                           buyer_id: str = None, sid: str = None,
+                                                           buyer_nick: str = None, status_signal: str = None,
+                                                           reason: str = "status_signal",
+                                                           delay_seconds: float = 0,
+                                                           log_prefix: str = "") -> bool:
+        normalized_order_id = str(order_id or '').strip()
+        if not normalized_order_id:
+            return False
+
+        current_order = db_manager.get_order_by_id(normalized_order_id) or {}
+        current_status = current_order.get('order_status')
+        if not self._should_force_refresh_after_status_signal(status_signal, current_status):
+            logger.info(
+                f"{log_prefix} 当前订单状态无需为该信号强刷详情: order_id={normalized_order_id}, "
+                f"signal={status_signal or 'unknown'}, current_status={current_status or 'unknown'}"
+            )
+            return False
+
+        if not self._reserve_order_detail_force_refresh(
+            normalized_order_id,
+            reason=reason,
+            log_prefix=log_prefix,
+        ):
+            return False
+
+        if delay_seconds and delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
+
+        latest_order = db_manager.get_order_by_id(normalized_order_id) or {}
+        latest_status = latest_order.get('order_status')
+        if not self._should_force_refresh_after_status_signal(status_signal, latest_status):
+            logger.info(
+                f"{log_prefix} 延迟后订单状态已更新，无需再强刷详情: order_id={normalized_order_id}, "
+                f"signal={status_signal or 'unknown'}, current_status={latest_status or 'unknown'}"
+            )
+            return False
+
+        refresh_item_id = item_id or latest_order.get('item_id')
+        refresh_buyer_id = buyer_id or latest_order.get('buyer_id')
+        logger.info(
+            f"{log_prefix} 状态信号触发订单详情强刷: order_id={normalized_order_id}, "
+            f"signal={status_signal or 'unknown'}, current_status={latest_status or 'unknown'}, reason={reason}"
+        )
+
+        try:
+            await self.fetch_order_detail_info(
+                order_id=normalized_order_id,
+                item_id=refresh_item_id,
+                buyer_id=refresh_buyer_id,
+                sid=sid,
+                buyer_nick=buyer_nick,
+                force_refresh=True
+            )
+            return True
+        except Exception as refresh_error:
+            logger.error(
+                f"{log_prefix} 状态信号触发订单详情强刷失败: order_id={normalized_order_id}, "
+                f"reason={reason}, error={self._safe_str(refresh_error)}"
+            )
+            return False
+
 
     def _load_json_dict(self, raw_value: Any) -> Dict[str, Any]:
         """安全解析 JSON 对象。"""
@@ -11329,27 +11474,27 @@ Cookie数量: {cookie_count}
                 except Exception as e:
                     logger.error(f"订单状态处理失败: {self._safe_str(e)}")
 
-            # 交易成功消息到达时强制刷新一次订单详情，避免缓存导致状态未及时落库
-            if order_id and send_message in ['[买家确认收货，交易成功]', '[你已确认收货，交易成功]']:
+            # 关键状态消息到达时，按需补刷一次订单详情，避免缓存把状态留在旧值
+            if order_id and order_status_signal in {'pending_ship', 'shipped', 'completed', 'cancelled', 'refunding'}:
                 try:
                     refresh_sid = ''
                     if isinstance(message_1, dict):
                         refresh_sid = message_1.get("2", "")
-                    logger.info(
-                        f"【{self.cookie_id}】[{msg_id}] 检测到交易成功系统消息，开始强制刷新订单详情: "
-                        f"order_id={order_id}, sid={refresh_sid}"
-                    )
-                    await self.fetch_order_detail_info(
+
+                    await self._maybe_force_refresh_order_detail_for_signal(
                         order_id=order_id,
                         item_id=item_id,
                         buyer_id=send_user_id,
                         sid=refresh_sid,
                         buyer_nick=send_user_name,
-                        force_refresh=True
+                        status_signal=order_status_signal,
+                        reason=f'message_signal_{order_status_signal}',
+                        delay_seconds=1 if order_status_signal == 'pending_ship' else 0,
+                        log_prefix=f"【{self.cookie_id}】[{msg_id}]"
                     )
                 except Exception as refresh_e:
                     logger.error(
-                        f"【{self.cookie_id}】[{msg_id}] 交易成功后强制刷新订单详情失败: {self._safe_str(refresh_e)}"
+                        f"【{self.cookie_id}】[{msg_id}] 状态消息触发订单详情补刷失败: {self._safe_str(refresh_e)}"
                     )
 
             # 【优先处理】检查系统消息和自动发货触发消息（不受人工接入暂停影响）
