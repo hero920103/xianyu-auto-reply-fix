@@ -107,7 +107,7 @@ WEBSOCKET_HEADERS = config.get('WEBSOCKET_HEADERS', {})
 APP_CONFIG = config.get('APP_CONFIG', {})
 AUTO_REPLY = config.get('AUTO_REPLY', {
     'enabled': True,
-    'default_message': '亲爱的"{send_user_name}" 老板你好！所有宝贝都可以拍，秒发货的哈~不满意的话可以直接申请退款哈~',
+    'default_message': '亲爱的"{send_user_name}" 老板你好！所有宝贝都可以拍，秒发货的哈~',
     'api': {
         'enabled': False,
         'url': 'http://localhost:8090/xianyu/reply',

@@ -3903,37 +3903,39 @@ Cookie数量: {cookie_count}
             chars = string.ascii_uppercase + string.digits
             captcha_text = ''.join(random.choices(chars, k=4))
 
-            # 创建图片
-            width, height = 120, 40
+            # 图片尺寸 - 高度52
+            width, height = 280, 52
             image = Image.new('RGB', (width, height), color='white')
             draw = ImageDraw.Draw(image)
 
-            # 尝试使用系统字体，如果失败则使用默认字体
+            # 强制使用 Arial Bold 或微软雅黑
+            font = None
             try:
-                # Windows系统字体
-                font = ImageFont.truetype("arial.ttf", 20)
+                font = ImageFont.truetype("C:/Windows/Fonts/ARIALBD.TTF", 36)
             except:
                 try:
-                    # 备用字体
-                    font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 20)
+                    font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 36)
                 except:
-                    # 使用默认字体
-                    font = ImageFont.load_default()
+                    try:
+                        font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 36)
+                    except:
+                        try:
+                            font = ImageFont.truetype("C:/Windows/Fonts/simsun.ttc", 36)
+                        except:
+                            font = ImageFont.load_default()
 
-            # 绘制验证码文本
-            for i, char in enumerate(captcha_text):
-                # 随机颜色
-                color = (
-                    random.randint(0, 100),
-                    random.randint(0, 100),
-                    random.randint(0, 100)
-                )
+            # 绘制验证码
+            colors = [
+                (0, 0, 139),
+                (139, 0, 0),
+                (0, 100, 0),
+            ]
 
-                # 随机位置（稍微偏移）
-                x = 20 + i * 20 + random.randint(-3, 3)
-                y = 8 + random.randint(-3, 3)
-
-                draw.text((x, y), char, font=font, fill=color)
+            x = 15
+            for char in captcha_text:
+                color = random.choice(colors)
+                draw.text((x, 2), char, font=font, fill=color)
+                x += 60
 
             # 添加干扰线
             for _ in range(3):
@@ -3943,9 +3945,9 @@ Cookie数量: {cookie_count}
 
             # 添加干扰点
             for _ in range(20):
-                x = random.randint(0, width)
-                y = random.randint(0, height)
-                draw.point((x, y), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
+                x_pos = random.randint(0, width)
+                y_pos = random.randint(0, height)
+                draw.point((x_pos, y_pos), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
 
             # 转换为base64
             buffer = io.BytesIO()

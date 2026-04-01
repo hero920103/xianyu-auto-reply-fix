@@ -360,85 +360,57 @@ def is_captcha_required(client_ip: str) -> bool:
 
 
 def generate_captcha_image(code: str) -> bytes:
-    """生成验证码图片"""
+    """生成真正受字号控制的验证码图片"""
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     import random
-    
-    # 图片尺寸
+    import io
+    import os
+
     width, height = 150, 50
-    
-    # 创建图片
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
-    
-    # 添加干扰线
-    for _ in range(5):
-        x1 = random.randint(0, width)
-        y1 = random.randint(0, height)
-        x2 = random.randint(0, width)
-        y2 = random.randint(0, height)
-        draw.line([(x1, y1), (x2, y2)], fill=(random.randint(100, 200), random.randint(100, 200), random.randint(100, 200)), width=1)
-    
-    # 添加干扰点
-    for _ in range(50):
-        x = random.randint(0, width)
-        y = random.randint(0, height)
-        draw.point((x, y), fill=(random.randint(0, 150), random.randint(0, 150), random.randint(0, 150)))
-    
-    # 尝试加载字体，如果失败则使用默认字体
+
+    # 设置一个合理的字号（50px高的图，40号已经很大了，180会直接超出屏幕）
     font = None
+
+    # 尝试多种路径加载字体，确保能加载到支持缩放的字体
     font_paths = [
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/ARIALBD.TTF", 
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
+        "C:/Windows/Fonts/arialbd.ttf",   # Windows Bold
+        "C:/Windows/Fonts/arial.ttf",     # Windows Regular
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # Linux
+        "arial.ttf", # 当前目录
     ]
-    
-    for font_path in font_paths:
+
+    for path in font_paths:
         try:
-            font = ImageFont.truetype(font_path, 32)
-            break
+            if os.path.exists(path) or os.name == 'nt': # 尝试加载
+                font = ImageFont.truetype("arial.ttf", 20)
+                break
         except:
             continue
-    
+
     if font is None:
-        # 使用默认字体
-        font = ImageFont.load_default()
+        # 如果还是没找到字体文件，这是最后的杀手锏：
+        # 抛出错误或者提示，因为 load_default() 绝对无法调大小
+        # 建议下载一个 arial.ttf 放在代码同级目录下
+        font = ImageFont.load_default() 
+        print("警告: 未能加载到中文字体文件，font_size 将失效！")
+
+    # 绘制
+    current_x = 15
+    colors = [(0, 0, 150), (150, 0, 0), (0, 100, 0)]
     
-    # 绘制验证码字符
-    colors = [
-        (0, 0, 139),      # 深蓝
-        (139, 0, 0),      # 深红
-        (0, 100, 0),      # 深绿
-        (139, 69, 19),    # 棕色
-        (75, 0, 130),     # 靛蓝
-    ]
-    
-    x_offset = 15
-    for i, char in enumerate(code):
-        # 随机颜色
+    for char in code:
         color = random.choice(colors)
-        # 随机角度（-15到15度）
-        angle = random.randint(-15, 15)
-        
-        # 创建单个字符的图片用于旋转
-        char_image = Image.new('RGBA', (35, 45), (255, 255, 255, 0))
-        char_draw = ImageDraw.Draw(char_image)
-        char_draw.text((5, 5), char, font=font, fill=color)
-        
-        # 旋转
-        char_image = char_image.rotate(angle, expand=False, fillcolor=(255, 255, 255, 0))
-        
-        # 粘贴到主图
-        y_offset = random.randint(2, 10)
-        image.paste(char_image, (x_offset, y_offset), char_image)
-        x_offset += 28
-    
-    # 添加轻微模糊
-    image = image.filter(ImageFilter.SMOOTH)
-    
-    # 转换为bytes
+        # 如果 font 是 load_default，这里的大小不会变
+        # 如果是 truetype，这里的大小会严格遵循 target_font_size
+        draw.text((current_x, 2), char, font=font, fill=color)
+        current_x += 32
+
+    # 干扰项
+    for _ in range(3):
+        draw.line([(0, random.randint(0,50)), (150, random.randint(0,50))], fill=(200,200,200))
+
     buffer = io.BytesIO()
     image.save(buffer, format='PNG')
     buffer.seek(0)

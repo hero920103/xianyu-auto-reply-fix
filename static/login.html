@@ -153,13 +153,13 @@
           
           <!-- 登录验证码 -->
           <div id="securityCaptchaSection" class="mb-3">
-            <label class="form-label"><i class="bi bi-shield-check text-primary me-1"></i>安全验证</label>
+            <label class="form-label"><i class="bi bi-shield-check text-primary me-1"></i></label>
             <div class="row g-2">
               <div class="col-7">
                 <input type="text" class="form-control" id="securityCaptchaCode" placeholder="输入验证码" maxlength="4" autocomplete="off">
               </div>
               <div class="col-5">
-                <div class="captcha-container" style="position: relative; height: 38px;">
+                <div class="captcha-container" style="position: relative; height: 52px;">
                   <img id="securityCaptchaImage" src="" alt="安全验证码"
                        style="width: 100%; height: 100%; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; object-fit: contain; background: #f8f9fa;"
                        onclick="refreshSecurityCaptcha()" title="点击刷新验证码">
@@ -195,7 +195,7 @@
                 <input type="text" class="form-control" id="emailSecurityCaptchaCode" placeholder="输入验证码" maxlength="4" autocomplete="off">
               </div>
               <div class="col-5">
-                <div class="captcha-container" style="position: relative; height: 38px;">
+                <div class="captcha-container" style="position: relative; height: 52px;">
                   <img id="emailSecurityCaptchaImage" src="" alt="安全验证码"
                        style="width: 100%; height: 100%; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; object-fit: contain; background: #f8f9fa;"
                        onclick="refreshEmailSecurityCaptcha()" title="点击刷新验证码">
@@ -226,9 +226,9 @@
                 <input type="text" class="form-control" id="captchaCode" placeholder="输入4位验证码" maxlength="4">
               </div>
               <div class="col-5">
-                <div class="captcha-container" style="position: relative;">
+                <div class="captcha-container" style="position: relative; height: 52px;">
                   <img id="captchaImage" src="" alt="图形验证码"
-                       style="width: 100%; height: 38px; border: 1px solid #ddd; border-radius: 5px; cursor: pointer;"
+                       style="width: 100%; height: 100%; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; object-fit: contain; background: #f8f9fa;"
                        onclick="refreshCaptcha()">
                   <div id="captchaLoading" class="text-center" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
                     <div class="spinner-border spinner-border-sm" role="status"></div>
